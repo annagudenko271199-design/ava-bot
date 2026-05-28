@@ -17,6 +17,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def load_allowed_ids() -> set[int]:
+    raw = os.getenv("ALLOWED_USER_IDS", "")
+    ids = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.add(int(part))
+    return ids
+
+ALLOWED_USER_IDS: set[int] = load_allowed_ids()
+
 SYSTEM_PROMPT = """Ти Ава — особистий асистент Ані. Відповідай українською, коротко і з легкою іронією.
 
 У тебе є доступ до Google Calendar через інструменти:
@@ -368,7 +379,24 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
 
 # --- Telegram handlers ---
 
+def is_allowed(update: Update) -> bool:
+    user_id = update.effective_user.id
+    if not ALLOWED_USER_IDS:
+        return True  # якщо список порожній — не блокуємо (зручно при першому налаштуванні)
+    allowed = user_id in ALLOWED_USER_IDS
+    if not allowed:
+        logger.warning("Blocked user_id=%s username=%s", user_id, update.effective_user.username)
+    return allowed
+
+
+async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    await update.message.reply_text(f"Твій Telegram ID: `{user.id}`", parse_mode="Markdown")
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
     chat_id = update.effective_chat.id
     conversation_history[chat_id] = []
     await update.message.reply_text(
@@ -383,12 +411,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
     chat_id = update.effective_chat.id
     conversation_history[chat_id] = []
     await update.message.reply_text("Контекст очищено.")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_allowed(update):
+        return
     chat_id = update.effective_chat.id
     user_text = update.message.text
 
@@ -451,6 +483,7 @@ def main() -> None:
 
     app = ApplicationBuilder().token(token).build()
 
+    app.add_handler(CommandHandler("myid", myid))
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
