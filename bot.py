@@ -40,18 +40,17 @@ def get_system_prompt() -> str:
 - get_today_events — події на сьогодні (повертає з ID)
 - get_week_events — події на тиждень (повертає з ID)
 - find_events — пошук подій за назвою і/або датою
-- create_event — створити нову подію (приймає attendees прямо при створенні)
+- create_event — створити нову подію (повертає посилання на подію)
 - delete_event — видалити подію за event_id
 - update_event — змінити назву або час існуючої події за event_id
 - add_attendees — додати учасників до вже існуючої події за event_id
 
 Правила роботи з Calendar:
-1. При СТВОРЕННІ події з учасниками — передавай їх email одразу в create_event через параметр attendees. find_events НЕ потрібен.
+1. При СТВОРЕННІ події — виклич create_event. Він поверне посилання. Відповідай: "Зустріч створена! Додай учасника вручну — ось посилання: [посилання]". Ніяких згадок про "технічні обмеження".
 2. При ВИДАЛЕННІ, РЕДАГУВАННІ або додаванні до ІСНУЮЧОЇ події — спочатку виклич find_events щоб отримати event_id.
 3. Якщо знайдено кілька схожих подій — уточни у користувача яку саме.
 4. Якщо час не вказано явно при створенні — уточни.
-5. Якщо email учасника не вказано — попроси його.
-6. Якщо інструмент повернув результат без слова "Помилка" — це успіх. Підтверджуй без власних застережень про "права" чи "обмеження".
+5. Якщо інструмент повернув результат без слова "Помилка" — це успіх. Підтверджуй без власних застережень.
 """
 
 TOOLS = [
@@ -79,7 +78,7 @@ TOOLS = [
     },
     {
         "name": "create_event",
-        "description": "Створити нову подію в Google Calendar",
+        "description": "Створити нову подію в Google Calendar. Повертає посилання на подію.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -87,11 +86,6 @@ TOOLS = [
                 "start_time": {"type": "string", "description": "Початок ISO 8601 (напр. 2025-05-28T14:00:00)"},
                 "end_time": {"type": "string", "description": "Кінець ISO 8601"},
                 "description": {"type": "string", "description": "Опис (опційно)"},
-                "attendees": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Список email учасників (опційно)",
-                },
             },
             "required": ["title", "start_time", "end_time"],
         },
@@ -269,14 +263,14 @@ def find_events(query: str = "", date_from: str = "", date_to: str = "") -> str:
 
 
 def create_calendar_event(title: str, start_time: str, end_time: str,
-                          description: str = "", attendees: list = None) -> str:
+                          description: str = "") -> str:
     calendar_id = os.getenv("GOOGLE_CALENDAR_ID")
     if not calendar_id:
         return "GOOGLE_CALENDAR_ID не налаштовано"
     try:
         start_norm = normalize_dt(start_time)
         end_norm = normalize_dt(end_time)
-        logger.info("create_event: title=%r start=%r end=%r attendees=%r", title, start_norm, end_norm, attendees)
+        logger.info("create_event: title=%r start=%r end=%r", title, start_norm, end_norm)
 
         service = get_calendar_service()
         event = {
@@ -286,16 +280,12 @@ def create_calendar_event(title: str, start_time: str, end_time: str,
         }
         if description:
             event["description"] = description
-        if attendees:
-            event["attendees"] = [{"email": e} for e in attendees]
 
         created = service.events().insert(calendarId=calendar_id, body=event).execute()
-        logger.info("create_event: success, event id=%s", created.get("id"))
+        html_link = created.get("htmlLink", "")
         dt = datetime.fromisoformat(start_norm)
-        result = f"Подію '{title}' створено на {dt.strftime('%d.%m.%Y о %H:%M')}."
-        if attendees:
-            result += f" Запрошено: {', '.join(attendees)}."
-        return result
+        logger.info("create_event: success id=%s link=%s", created.get("id"), html_link)
+        return f"СТВОРЕНО: '{title}' на {dt.strftime('%d.%m.%Y о %H:%M')}. ПОСИЛАННЯ: {html_link}"
     except Exception as e:
         logger.error("create_event error: %s\n%s", e, traceback.format_exc())
         return f"Помилка створення: {e}"
@@ -395,7 +385,6 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             start_time=tool_input["start_time"],
             end_time=tool_input["end_time"],
             description=tool_input.get("description", ""),
-            attendees=tool_input.get("attendees", []),
         )
 
     if tool_name == "delete_event":
