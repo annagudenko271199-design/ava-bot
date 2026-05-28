@@ -1,8 +1,9 @@
 import os
+import re
 import json
 import logging
 import traceback
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, time as dt_time
 from dotenv import load_dotenv
 import anthropic
 from telegram import Update
@@ -510,6 +511,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("Щось пішло не так з API. Спробуй ще раз.")
 
 
+BRIEFING_CHAT_ID = 8563840820
+
+
+async def morning_briefing(context: ContextTypes.DEFAULT_TYPE) -> None:
+    now = datetime.now(tz=KYIV_TZ)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    events_raw = get_events(day_start, day_start + timedelta(days=1))
+
+    if events_raw == "Подій немає.":
+        body = "День вільний, насолоджуйся 😌"
+    else:
+        # Прибираємо [id:...] теги — у брифінгу вони зайві
+        body = re.sub(r"\s*\[id:[^\]]+\]", "", events_raw)
+
+    text = f"Доброго ранку! Ось твій план на сьогодні:\n\n{body}"
+    try:
+        await context.bot.send_message(chat_id=BRIEFING_CHAT_ID, text=text)
+        logger.info("Morning briefing sent to %s", BRIEFING_CHAT_ID)
+    except Exception as e:
+        logger.error("Morning briefing failed: %s", e)
+
+
 def main() -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -521,6 +544,13 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("clear", clear))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    app.job_queue.run_daily(
+        morning_briefing,
+        time=dt_time(9, 0, 0, tzinfo=KYIV_TZ),
+        name="morning_briefing",
+    )
+    logger.info("Morning briefing scheduled at 09:00 Kyiv time")
 
     logger.info("Ava bot запущено...")
     app.run_polling()
