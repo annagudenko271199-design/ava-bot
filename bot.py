@@ -3,6 +3,7 @@ import re
 import json
 import logging
 import traceback
+from collections import deque
 from datetime import datetime, timedelta, timezone, time as dt_time
 from dotenv import load_dotenv
 import anthropic
@@ -140,6 +141,10 @@ anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 conversation_history: dict[int, list[dict]] = {}
 
+# Дедуплікація: зберігаємо останні 200 message_id щоб не відповідати двічі
+# (Telegram ретраїть доставку якщо бот не відповів за ~30с)
+_processed_ids: deque = deque(maxlen=200)
+
 KYIV_TZ = timezone(timedelta(hours=3))
 
 
@@ -271,7 +276,10 @@ def create_calendar_event(title: str, start_time: str, end_time: str,
     try:
         start_norm = normalize_dt(start_time)
         end_norm = normalize_dt(end_time)
-        logger.info("create_event: title=%r start=%r end=%r", title, start_norm, end_norm)
+        logger.info(
+            "create_event: calendarId=%r title=%r start=%r end=%r",
+            calendar_id, title, start_norm, end_norm,
+        )
 
         service = get_calendar_service()
         event = {
@@ -284,8 +292,12 @@ def create_calendar_event(title: str, start_time: str, end_time: str,
 
         created = service.events().insert(calendarId=calendar_id, body=event).execute()
         html_link = created.get("htmlLink", "")
+        organizer = created.get("organizer", {}).get("email", "?")
+        logger.info(
+            "create_event: SUCCESS id=%s organizer=%s calendarId=%r link=%s",
+            created.get("id"), organizer, calendar_id, html_link,
+        )
         dt = datetime.fromisoformat(start_norm)
-        logger.info("create_event: success id=%s link=%s", created.get("id"), html_link)
         return f"СТВОРЕНО: '{title}' на {dt.strftime('%d.%m.%Y о %H:%M')}. ПОСИЛАННЯ: {html_link}"
     except Exception as e:
         logger.error("create_event error: %s\n%s", e, traceback.format_exc())
@@ -456,6 +468,13 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_allowed(update):
         return
+
+    msg_id = update.message.message_id
+    if msg_id in _processed_ids:
+        logger.warning("Duplicate message_id=%s — skipping", msg_id)
+        return
+    _processed_ids.append(msg_id)
+
     chat_id = update.effective_chat.id
     user_text = update.message.text
 
