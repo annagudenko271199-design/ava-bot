@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(claude-api)",
+      "Bash(pip3 show:*)",
+      "Read(//usr/local/bin/**)",
+      "Read(//opt/homebrew/bin/**)"
+    ]
+  }
+}

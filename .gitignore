@@ -1,0 +1,20 @@
+# Секрети
+.env
+credentials.json
+
+# Логи
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# launchd
+start.sh
