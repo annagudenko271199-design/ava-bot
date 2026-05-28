@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import base64
 import logging
 import traceback
 from collections import deque
@@ -182,12 +183,20 @@ def normalize_dt(dt_str: str) -> str:
 # --- Google Calendar ---
 
 def get_calendar_service():
-    creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
-    if creds_json:
-        info = json.loads(creds_json)
+    # Пріоритет 1: base64-encoded JSON (Railway)
+    creds_b64 = os.getenv("GOOGLE_CREDENTIALS_BASE64")
+    if creds_b64:
+        info = json.loads(base64.b64decode(creds_b64).decode("utf-8"))
         credentials = service_account.Credentials.from_service_account_info(
             info, scopes=["https://www.googleapis.com/auth/calendar"]
         )
+    # Пріоритет 2: сирий JSON рядок (старий формат, для сумісності)
+    elif os.getenv("GOOGLE_CREDENTIALS_JSON"):
+        info = json.loads(os.getenv("GOOGLE_CREDENTIALS_JSON"))
+        credentials = service_account.Credentials.from_service_account_info(
+            info, scopes=["https://www.googleapis.com/auth/calendar"]
+        )
+    # Пріоритет 3: файл (локальна розробка)
     else:
         credentials = service_account.Credentials.from_service_account_file(
             os.path.join(os.path.dirname(__file__), "credentials.json"),
