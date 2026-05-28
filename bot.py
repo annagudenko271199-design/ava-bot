@@ -39,18 +39,19 @@ def get_system_prompt() -> str:
 У тебе є доступ до Google Calendar через інструменти:
 - get_today_events — події на сьогодні (повертає з ID)
 - get_week_events — події на тиждень (повертає з ID)
-- find_events — пошук подій за назвою і/або датою (обов'язково перед delete/update/add_attendees)
-- create_event — створити нову подію
+- find_events — пошук подій за назвою і/або датою
+- create_event — створити нову подію (приймає attendees прямо при створенні)
 - delete_event — видалити подію за event_id
 - update_event — змінити назву або час існуючої події за event_id
-- add_attendees — додати учасників на існуючу подію за event_id
+- add_attendees — додати учасників до вже існуючої події за event_id
 
 Правила роботи з Calendar:
-1. Перед видаленням, редагуванням або запрошенням — спочатку виклич find_events щоб знайти event_id.
-2. Якщо знайдено кілька схожих подій — уточни у користувача яку саме.
-3. Якщо час не вказано явно при створенні — уточни.
-4. Якщо email учасника не вказано — попроси його.
-5. Після успішної дії — коротко підтверди що зроблено.
+1. При СТВОРЕННІ події з учасниками — передавай їх email одразу в create_event через параметр attendees. find_events НЕ потрібен.
+2. При ВИДАЛЕННІ, РЕДАГУВАННІ або додаванні до ІСНУЮЧОЇ події — спочатку виклич find_events щоб отримати event_id.
+3. Якщо знайдено кілька схожих подій — уточни у користувача яку саме.
+4. Якщо час не вказано явно при створенні — уточни.
+5. Якщо email учасника не вказано — попроси його.
+6. Якщо інструмент повернув результат без слова "Помилка" — це успіх. Підтверджуй без власних застережень про "права" чи "обмеження".
 """
 
 TOOLS = [
@@ -288,7 +289,7 @@ def create_calendar_event(title: str, start_time: str, end_time: str,
         if attendees:
             event["attendees"] = [{"email": e} for e in attendees]
 
-        created = service.events().insert(calendarId=calendar_id, body=event, sendUpdates="all").execute()
+        created = service.events().insert(calendarId=calendar_id, body=event).execute()
         logger.info("create_event: success, event id=%s", created.get("id"))
         dt = datetime.fromisoformat(start_norm)
         result = f"Подію '{title}' створено на {dt.strftime('%d.%m.%Y о %H:%M')}."
@@ -363,7 +364,7 @@ def add_attendees_to_event(event_id: str, emails: list) -> str:
             return f"Всі учасники вже додані на '{event.get('summary', 'подію')}'."
 
         event.setdefault("attendees", []).extend([{"email": e} for e in new_attendees])
-        service.events().update(calendarId=calendar_id, eventId=event_id, body=event, sendUpdates="all").execute()
+        service.events().update(calendarId=calendar_id, eventId=event_id, body=event).execute()
         return f"На '{event.get('summary', 'подію')}' додано: {', '.join(new_attendees)}."
     except Exception as e:
         logger.error("add_attendees error: %s", e)
