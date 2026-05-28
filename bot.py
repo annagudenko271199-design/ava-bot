@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import traceback
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import anthropic
@@ -146,6 +147,37 @@ conversation_history: dict[int, list[dict]] = {}
 KYIV_TZ = timezone(timedelta(hours=3))
 
 
+def serialize_content(content) -> list:
+    """Перетворює Pydantic content-блоки на прості dict для збереження в conversation_history."""
+    result = []
+    for block in content:
+        if hasattr(block, "model_dump"):
+            result.append(block.model_dump())
+        elif isinstance(block, dict):
+            result.append(block)
+        else:
+            result.append({"type": "text", "text": str(block)})
+    return result
+
+
+def normalize_dt(dt_str: str) -> str:
+    """Нормалізує datetime-рядок для Google Calendar API.
+    Прибирає timezone offset (+HH:MM або Z), бо timeZone задається окремо.
+    Python 3.9 fromisoformat не підтримує +HH:MM.
+    """
+    if not dt_str:
+        return dt_str
+    # Прибираємо Z
+    if dt_str.endswith("Z"):
+        dt_str = dt_str[:-1]
+    # Прибираємо +HH:MM або -HH:MM в кінці
+    for i in range(len(dt_str) - 1, max(len(dt_str) - 7, 9), -1):
+        if dt_str[i] in ("+", "-"):
+            dt_str = dt_str[:i]
+            break
+    return dt_str
+
+
 # --- Google Calendar ---
 
 def get_calendar_service():
@@ -241,25 +273,30 @@ def create_calendar_event(title: str, start_time: str, end_time: str,
     if not calendar_id:
         return "GOOGLE_CALENDAR_ID не налаштовано"
     try:
+        start_norm = normalize_dt(start_time)
+        end_norm = normalize_dt(end_time)
+        logger.info("create_event: title=%r start=%r end=%r attendees=%r", title, start_norm, end_norm, attendees)
+
         service = get_calendar_service()
         event = {
             "summary": title,
-            "start": {"dateTime": start_time, "timeZone": "Europe/Kyiv"},
-            "end": {"dateTime": end_time, "timeZone": "Europe/Kyiv"},
+            "start": {"dateTime": start_norm, "timeZone": "Europe/Kyiv"},
+            "end": {"dateTime": end_norm, "timeZone": "Europe/Kyiv"},
         }
         if description:
             event["description"] = description
         if attendees:
             event["attendees"] = [{"email": e} for e in attendees]
 
-        service.events().insert(calendarId=calendar_id, body=event, sendUpdates="all").execute()
-        dt = datetime.fromisoformat(start_time)
+        created = service.events().insert(calendarId=calendar_id, body=event, sendUpdates="all").execute()
+        logger.info("create_event: success, event id=%s", created.get("id"))
+        dt = datetime.fromisoformat(start_norm)
         result = f"Подію '{title}' створено на {dt.strftime('%d.%m.%Y о %H:%M')}."
         if attendees:
             result += f" Запрошено: {', '.join(attendees)}."
         return result
     except Exception as e:
-        logger.error("create_event error: %s", e)
+        logger.error("create_event error: %s\n%s", e, traceback.format_exc())
         return f"Помилка створення: {e}"
 
 
@@ -290,12 +327,14 @@ def update_calendar_event(event_id: str, title: str = "", start_time: str = "",
             event["summary"] = title
             changes.append(f"назва → '{title}'")
         if start_time:
-            event["start"] = {"dateTime": start_time, "timeZone": "Europe/Kyiv"}
-            dt = datetime.fromisoformat(start_time)
+            start_norm = normalize_dt(start_time)
+            event["start"] = {"dateTime": start_norm, "timeZone": "Europe/Kyiv"}
+            dt = datetime.fromisoformat(start_norm)
             changes.append(f"початок → {dt.strftime('%d.%m %H:%M')}")
         if end_time:
-            event["end"] = {"dateTime": end_time, "timeZone": "Europe/Kyiv"}
-            dt = datetime.fromisoformat(end_time)
+            end_norm = normalize_dt(end_time)
+            event["end"] = {"dateTime": end_norm, "timeZone": "Europe/Kyiv"}
+            dt = datetime.fromisoformat(end_norm)
             changes.append(f"кінець → {dt.strftime('%d.%m %H:%M')}")
         if description:
             event["description"] = description
@@ -451,13 +490,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     (b.text for b in response.content if b.type == "text"), ""
                 )
                 conversation_history[chat_id].append(
-                    {"role": "assistant", "content": response.content}
+                    {"role": "assistant", "content": serialize_content(response.content)}
                 )
                 await update.message.reply_text(assistant_text)
                 break
 
             if response.stop_reason == "tool_use":
-                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "assistant", "content": serialize_content(response.content)})
 
                 tool_results = []
                 for block in response.content:
