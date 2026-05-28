@@ -28,7 +28,12 @@ def load_allowed_ids() -> set[int]:
 
 ALLOWED_USER_IDS: set[int] = load_allowed_ids()
 
-SYSTEM_PROMPT = """Ти Ава — особистий асистент Ані. Відповідай українською, коротко і з легкою іронією.
+def get_system_prompt() -> str:
+    now = datetime.now(tz=KYIV_TZ)
+    date_str = now.strftime("%A, %d %B %Y, %H:%M")
+    return f"""Ти Ава — особистий асистент Ані. Відповідай українською, коротко і з легкою іронією.
+
+Зараз: {date_str} (часовий пояс Київ, UTC+3).
 
 У тебе є доступ до Google Calendar через інструменти:
 - get_today_events — події на сьогодні (повертає з ID)
@@ -247,7 +252,7 @@ def create_calendar_event(title: str, start_time: str, end_time: str,
         if attendees:
             event["attendees"] = [{"email": e} for e in attendees]
 
-        service.events().insert(calendarId=calendar_id, body=event).execute()
+        service.events().insert(calendarId=calendar_id, body=event, sendUpdates="all").execute()
         dt = datetime.fromisoformat(start_time)
         result = f"Подію '{title}' створено на {dt.strftime('%d.%m.%Y о %H:%M')}."
         if attendees:
@@ -318,8 +323,8 @@ def add_attendees_to_event(event_id: str, emails: list) -> str:
         if not new_attendees:
             return f"Всі учасники вже додані на '{event.get('summary', 'подію')}'."
 
-        event.setdefault("attendees", []).extend({"email": e} for e in new_attendees)
-        service.events().update(calendarId=calendar_id, eventId=event_id, body=event).execute()
+        event.setdefault("attendees", []).extend([{"email": e} for e in new_attendees])
+        service.events().update(calendarId=calendar_id, eventId=event_id, body=event, sendUpdates="all").execute()
         return f"На '{event.get('summary', 'подію')}' додано: {', '.join(new_attendees)}."
     except Exception as e:
         logger.error("add_attendees error: %s", e)
@@ -436,7 +441,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             response = anthropic_client.messages.create(
                 model="claude-sonnet-4-5",
                 max_tokens=1024,
-                system=SYSTEM_PROMPT,
+                system=get_system_prompt(),
                 tools=TOOLS,
                 messages=messages,
             )
