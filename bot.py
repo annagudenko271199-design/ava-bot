@@ -276,8 +276,8 @@ def create_calendar_event(title: str, start_time: str, end_time: str,
         service = get_calendar_service()
         event = {
             "summary": title,
-            "start": {"dateTime": start_norm, "timeZone": "Europe/Kyiv"},
-            "end": {"dateTime": end_norm, "timeZone": "Europe/Kyiv"},
+            "start": {"dateTime": start_norm, "timeZone": "Europe/Kiev"},
+            "end": {"dateTime": end_norm, "timeZone": "Europe/Kiev"},
         }
         if description:
             event["description"] = description
@@ -320,12 +320,12 @@ def update_calendar_event(event_id: str, title: str = "", start_time: str = "",
             changes.append(f"назва → '{title}'")
         if start_time:
             start_norm = normalize_dt(start_time)
-            event["start"] = {"dateTime": start_norm, "timeZone": "Europe/Kyiv"}
+            event["start"] = {"dateTime": start_norm, "timeZone": "Europe/Kiev"}
             dt = datetime.fromisoformat(start_norm)
             changes.append(f"початок → {dt.strftime('%d.%m %H:%M')}")
         if end_time:
             end_norm = normalize_dt(end_time)
-            event["end"] = {"dateTime": end_norm, "timeZone": "Europe/Kyiv"}
+            event["end"] = {"dateTime": end_norm, "timeZone": "Europe/Kiev"}
             dt = datetime.fromisoformat(end_norm)
             changes.append(f"кінець → {dt.strftime('%d.%m %H:%M')}")
         if description:
