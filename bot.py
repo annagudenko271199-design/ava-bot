@@ -40,6 +40,12 @@ def get_system_prompt() -> str:
 
 Зараз: {date_str} (часовий пояс Київ, UTC+3).
 
+ФОРМАТУВАННЯ ВІДПОВІДЕЙ (обов'язково):
+- Використовуй ЛИШЕ HTML теги: <b>жирний</b>, <i>курсив</i>, <code>код</code>
+- Заголовки — просто текст ВЕЛИКИМИ ЛІТЕРАМИ або без форматування, БЕЗ #
+- НЕ використовуй Markdown: ніяких **текст**, *текст*, # заголовків, `код`
+- Символи < > & в звичайному тексті не використовуй (тільки в HTML тегах)
+
 У тебе є доступ до Google Calendar через інструменти:
 - get_today_events — події на сьогодні (повертає з ID)
 - get_week_events — події на тиждень (повертає з ID)
@@ -559,7 +565,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 conversation_history[chat_id].append(
                     {"role": "assistant", "content": serialize_content(response.content)}
                 )
-                await update.message.reply_text(assistant_text)
+                try:
+                    await update.message.reply_text(assistant_text, parse_mode="HTML")
+                except Exception:
+                    await update.message.reply_text(assistant_text)
                 break
 
             if response.stop_reason == "tool_use":
