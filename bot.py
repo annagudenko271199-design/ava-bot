@@ -7,6 +7,7 @@ import traceback
 from collections import deque
 from datetime import datetime, timedelta, timezone, time as dt_time
 from dotenv import load_dotenv
+import httpx
 import anthropic
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -47,6 +48,7 @@ def get_system_prompt() -> str:
 - delete_event — видалити подію за event_id
 - update_event — змінити назву або час існуючої події за event_id
 - add_attendees — додати учасників до вже існуючої події за event_id
+- web_fetch — прочитати вміст веб-сторінки за URL
 
 Правила роботи з Calendar:
 1. При СТВОРЕННІ події — виклич create_event. Він поверне посилання. Відповідай: "Зустріч створена! Додай учасника вручну — ось посилання: [посилання]". Ніяких згадок про "технічні обмеження".
@@ -54,6 +56,7 @@ def get_system_prompt() -> str:
 3. Якщо знайдено кілька схожих подій — уточни у користувача яку саме.
 4. Якщо час не вказано явно при створенні — уточни.
 5. Якщо інструмент повернув результат без слова "Помилка" — це успіх. Підтверджуй без власних застережень.
+6. Якщо в повідомленні є URL — ОБОВ'ЯЗКОВО виклич web_fetch щоб прочитати вміст перед відповіддю.
 """
 
 TOOLS = [
@@ -136,9 +139,20 @@ TOOLS = [
             "required": ["event_id", "emails"],
         },
     },
+    {
+        "name": "web_fetch",
+        "description": "Прочитати вміст веб-сторінки за URL. Використовуй автоматично коли в повідомленні є посилання.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL сторінки для читання"},
+            },
+            "required": ["url"],
+        },
+    },
 ]
 
-anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+anthropic_client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 conversation_history: dict[int, list[dict]] = {}
 
@@ -383,6 +397,37 @@ def add_attendees_to_event(event_id: str, emails: list) -> str:
         return f"Помилка додавання учасників: {e}"
 
 
+def fetch_url(url: str) -> str:
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; AvaBot/1.0)"}
+        with httpx.Client(follow_redirects=True, timeout=15) as client:
+            resp = client.get(url, headers=headers)
+            resp.raise_for_status()
+        content_type = resp.headers.get("content-type", "")
+        text = resp.text
+        if "html" in content_type:
+            # Прибираємо script/style блоки
+            text = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE)
+            # Замінюємо block-теги на переноси рядків
+            text = re.sub(r'<(?:br|p|div|h[1-6]|li|tr)[^>]*>', '\n', text, flags=re.IGNORECASE)
+            # Прибираємо всі інші теги
+            text = re.sub(r'<[^>]+>', '', text)
+            # Розкодовуємо HTML entities
+            text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&nbsp;', ' ').replace('&quot;', '"')
+            # Нормалізуємо пробіли
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            text = re.sub(r'[ \t]+', ' ', text)
+            text = text.strip()
+        return text[:6000] if text else "Сторінка порожня."
+    except httpx.HTTPStatusError as e:
+        return f"Не вдалось прочитати сторінку: HTTP {e.response.status_code}"
+    except httpx.TimeoutException:
+        return "Не вдалось прочитати сторінку: timeout (сайт не відповів за 15с)"
+    except Exception as e:
+        logger.error("fetch_url error: %s", e)
+        return f"Не вдалось прочитати сторінку: {e}"
+
+
 def execute_tool(tool_name: str, tool_input: dict) -> str:
     now = datetime.now(tz=KYIV_TZ)
 
@@ -429,6 +474,9 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             event_id=tool_input["event_id"],
             emails=tool_input["emails"],
         )
+
+    if tool_name == "web_fetch":
+        return fetch_url(tool_input["url"])
 
     return f"Невідомий інструмент: {tool_name}"
 
@@ -496,7 +544,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         messages = conversation_history[chat_id]
 
         while True:
-            response = anthropic_client.messages.create(
+            response = await anthropic_client.messages.create(
                 model="claude-sonnet-4-5",
                 max_tokens=1024,
                 system=get_system_prompt(),
@@ -581,7 +629,7 @@ def main() -> None:
     logger.info("Morning briefing scheduled at 09:00 Kyiv time")
 
     logger.info("Ava bot запущено...")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
