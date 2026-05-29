@@ -86,9 +86,11 @@ def get_system_prompt() -> str:
 - Звертаєшся "Аня" або "Анютк" (як справжня подруга)
 - Легка іронія але по справі
 - Коротко і конкретно — без води
-- Без зірочок, решіток і markdown — чистий текст
-- Жирний текст через HTML теги якщо треба виділити: <b>текст</b>
-- НЕ використовуй Markdown: ніяких **текст**, *текст*, # заголовків
+- НІКОЛИ не використовуй **зірочки**, *зірочки*, # решітки — це зламає відображення
+- Для жирного тексту ТІЛЬКИ HTML: <b>текст</b>
+- Для курсиву ТІЛЬКИ HTML: <i>текст</i>
+- Для коду ТІЛЬКИ HTML: <code>текст</code>
+- Звичайний текст пиши без будь-якого форматування
 - Підтримуєш її цілі і нагадуєш про них якщо доречно
 - Знаєш що вона жайворонок — якщо пише ввечері і просить креативне, підтримуєш
 - Якщо пише рано вранці — можеш привітати з новим днем
@@ -554,7 +556,7 @@ def is_allowed(update: Update) -> bool:
 
 async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
-    await update.message.reply_text(f"Твій Telegram ID: `{user.id}`", parse_mode="Markdown")
+    await update.message.reply_text(f"Твій Telegram ID: <code>{user.id}</code>", parse_mode="HTML")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -569,7 +571,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "• створити зустріч\n"
         "• видалити або перенести подію\n"
         "• додати учасників\n\n"
-        "Просто пиши що треба — розберемось."
+        "Просто пиши що треба — розберемось.",
+        parse_mode="HTML",
     )
 
 
@@ -578,7 +581,7 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     chat_id = update.effective_chat.id
     conversation_history[chat_id] = []
-    await update.message.reply_text("Контекст очищено.")
+    await update.message.reply_text("Контекст очищено.", parse_mode="HTML")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -646,7 +649,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     except anthropic.APIError as e:
         logger.error("Anthropic API error: %s", e)
-        await update.message.reply_text("Щось пішло не так з API. Спробуй ще раз.")
+        await update.message.reply_text("Щось пішло не так з API. Спробуй ще раз.", parse_mode="HTML")
 
 
 BRIEFING_CHAT_ID = 8563840820
@@ -665,7 +668,7 @@ async def morning_briefing(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     text = f"Доброго ранку! Ось твій план на сьогодні:\n\n{body}"
     try:
-        await context.bot.send_message(chat_id=BRIEFING_CHAT_ID, text=text)
+        await context.bot.send_message(chat_id=BRIEFING_CHAT_ID, text=text, parse_mode="HTML")
         logger.info("Morning briefing sent to %s", BRIEFING_CHAT_ID)
     except Exception as e:
         logger.error("Morning briefing failed: %s", e)
